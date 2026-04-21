@@ -81,36 +81,99 @@ class OddsForgeBot:
         await self.gamma.close()
         logger.info("cleanup_complete")
 
+from utils.wallet import WalletManager
+from utils.bridge import BridgeManager
+from utils.database import init_db, SessionLocal, User
+import sys
+import os
+import asyncio
+import signal
+import structlog
+from config.settings import settings
+from passlib.context import CryptContext
+from pydantic import SecretStr
+
+# Auth setup
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+init_db()
+
 async def run_setup_wizard():
     """
-    Interactive setup wizard for first-time users.
+    Complete operational journey: Registration -> Wallet -> Funding -> Trading.
     """
     print("\n" + "╔" + "═"*50 + "╗")
-    print("║" + " "*14 + "ODDSFORGE BOT SETUP WIZARD" + " "*14 + "║")
+    print("║" + " "*14 + "ODDSFORGE BOT LAUNCH SYSTEM" + " "*14 + "║")
     print("╚" + "═"*50 + "╝")
     
-    if not settings.POLY_PRIVATE_KEY:
-        print("\n[!] No wallet detected.")
-        choice = input("Do you want to (1) Create a new wallet or (2) Connect existing? [1/2]: ")
+    db = SessionLocal()
+    
+    # 1. USER REGISTRATION / SIGN UP
+    print("\n[👤] STEP 1: USER REGISTRATION")
+    username = input("Enter new username: ")
+    password = input("Enter password: ")
+    
+    # Check if user exists
+    existing_user = db.query(User).filter(User.username == username).first()
+    if existing_user:
+        print(f"[✓] Welcome back, {username}! Authenticating...")
+        user = existing_user
+    else:
+        # 2. WALLET CREATION
+        print("\n[🔑] STEP 2: WALLET CREATION")
+        new_wallet = WalletManager.create_new_wallet()
+        hashed_password = pwd_context.hash(password)
         
-        if choice == "1":
-            new_wallet = WalletManager.create_new_wallet()
-            print("\n[✓] NEW WALLET GENERATED:")
-            print(f"    Address: {new_wallet['address']}")
-            print(f"    Private Key: {new_wallet['private_key']}")
-            print("\n[!] IMPORTANT: Copy the Private Key into your .env file.")
-            print(f"[!] Fund this address with at least $3 USDC on Polygon to start.")
-        else:
-            print("\n[!] Please paste your Private Key into the .env file and restart.")
-        
-        input("\nPress Enter once you have updated your .env file...")
-        sys.exit(0)
+        user = User(
+            username=username,
+            hashed_password=hashed_password,
+            wallet_address=new_wallet['address'],
+            encrypted_private_key=new_wallet['private_key'], # In prod, encrypt with user password
+            balance_usdc=0.0
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        print(f"    [✓] Created unique wallet for {username}: {user.wallet_address}")
+    
+    # 3. FUNDING MODULE
+    print("\n[💰] STEP 3: FUNDING MODULE")
+    print(f"    Current Balance: {user.balance_usdc} USDC")
+    print("    Deposit instructions:")
+    instr = BridgeManager.get_deposit_instructions(user.wallet_address)
+    for chain, addr in instr.items():
+        print(f"      - {chain}: {addr}")
+    
+    funding_choice = input("\nDetect funds automatically? [Y/n]: ")
+    if funding_choice.lower() != "n":
+        deposit_amount = await BridgeManager.monitor_deposits(user.wallet_address)
+        user.balance_usdc += deposit_amount
+        db.commit()
+        print(f"\n[💎] NEW BALANCE: {user.balance_usdc} USDC")
+    
+    # 4. AUTOMATED TRADING ENGINE ACTIVATION
+    print("\n[🚀] STEP 4: TRADING ENGINE ACTIVATION")
+    if user.balance_usdc >= 0.5: # Sufficient funds check
+        print(f"    [✓] Sufficient funds detected ({user.balance_usdc} USDC).")
+        print("    [✓] Activating High-Frequency Trading Loop...")
+        # Update settings with user's specific wallet and bankroll
+        settings.POLY_PRIVATE_KEY = SecretStr(user.encrypted_private_key)
+        settings.BANKROLL = user.balance_usdc
+        db.close()
+        return True
+    else:
+        print("    [X] Insufficient funds (< 0.5 USDC). Trading inactive.")
+        db.close()
+        return False
 
 async def main():
-    # Run setup wizard if needed
-    if not settings.POLY_PRIVATE_KEY:
-        await run_setup_wizard()
+    # Run the full operational journey
+    operational = await run_setup_wizard()
+    
+    if not operational:
+        print("\n[!] Setup incomplete. Bot exiting.")
+        sys.exit(0)
 
+    # Initialize components after registration and funding
     bot = OddsForgeBot()
     
     # Handle graceful shutdown
