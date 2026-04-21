@@ -81,7 +81,36 @@ class OddsForgeBot:
         await self.gamma.close()
         logger.info("cleanup_complete")
 
+async def run_setup_wizard():
+    """
+    Interactive setup wizard for first-time users.
+    """
+    print("\n" + "╔" + "═"*50 + "╗")
+    print("║" + " "*14 + "ODDSFORGE BOT SETUP WIZARD" + " "*14 + "║")
+    print("╚" + "═"*50 + "╝")
+    
+    if not settings.POLY_PRIVATE_KEY:
+        print("\n[!] No wallet detected.")
+        choice = input("Do you want to (1) Create a new wallet or (2) Connect existing? [1/2]: ")
+        
+        if choice == "1":
+            new_wallet = WalletManager.create_new_wallet()
+            print("\n[✓] NEW WALLET GENERATED:")
+            print(f"    Address: {new_wallet['address']}")
+            print(f"    Private Key: {new_wallet['private_key']}")
+            print("\n[!] IMPORTANT: Copy the Private Key into your .env file.")
+            print(f"[!] Fund this address with at least $3 USDC on Polygon to start.")
+        else:
+            print("\n[!] Please paste your Private Key into the .env file and restart.")
+        
+        input("\nPress Enter once you have updated your .env file...")
+        sys.exit(0)
+
 async def main():
+    # Run setup wizard if needed
+    if not settings.POLY_PRIVATE_KEY:
+        await run_setup_wizard()
+
     bot = OddsForgeBot()
     
     # Handle graceful shutdown
