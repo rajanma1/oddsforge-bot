@@ -12,22 +12,28 @@ class PolymarketCLOB:
     Wrapper for Polymarket CLOB API (Trading and Orderbook)
     """
     def __init__(self):
-        # Initialize the official SDK client
-        self.client = ClobClient(
-            host="https://clob.polymarket.com",
-            key=settings.POLY_API_KEY,
-            secret=settings.POLY_API_SECRET,
-            passphrase=settings.POLY_API_PASSPHRASE,
-            private_key=settings.POLY_PRIVATE_KEY.get_secret_value(),
-            chain_id=settings.CHAIN_ID
-        )
-        logger.info("clob_client_initialized", host="https://clob.polymarket.com")
+        # Initialize the official SDK client if credentials exist
+        if settings.POLY_PRIVATE_KEY:
+            self.client = ClobClient(
+                host="https://clob.polymarket.com",
+                key=settings.POLY_API_KEY,
+                secret=settings.POLY_API_SECRET,
+                passphrase=settings.POLY_API_PASSPHRASE,
+                private_key=settings.POLY_PRIVATE_KEY.get_secret_value(),
+                chain_id=settings.CHAIN_ID
+            )
+            logger.info("clob_client_initialized", host="https://clob.polymarket.com")
+        else:
+            self.client = None
+            logger.warning("clob_client_uninitialized_missing_creds")
 
     async def is_ready(self) -> bool:
         """
         Verifies if the client can connect to the CLOB API.
         """
         try:
+            if not self.client:
+                return False
             # Simple check to see if we can fetch something
             resp = self.client.get_ok()
             return resp == "OK"

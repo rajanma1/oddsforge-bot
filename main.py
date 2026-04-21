@@ -8,6 +8,7 @@ from executor.order_manager import OrderManager
 from risk.risk_manager import RiskManager
 from core.math import QuantMath, ProbabilityEstimator
 from monitor.logger import setup_logging
+from utils.wallet import WalletManager
 import structlog
 
 # Initialize logging
@@ -17,6 +18,14 @@ logger = structlog.get_logger(__name__)
 class OddsForgeBot:
     def __init__(self):
         self.running = True
+        
+        # Check if wallet exists, if not, offer creation
+        if not settings.POLY_PRIVATE_KEY:
+            logger.warning("no_wallet_found_generating_new")
+            new_wallet = WalletManager.create_new_wallet()
+            WalletManager.save_to_env(new_wallet['private_key'], new_wallet['address'])
+            logger.info("please_update_env_and_restart")
+            # In a real CLI, we might pause here, but for now we proceed with uninitialized client
         
         # Initialize components
         self.gamma = GammaClient()
